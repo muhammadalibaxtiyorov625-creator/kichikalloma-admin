@@ -3,10 +3,10 @@
 // ==========================================================================
 const API_BASE_URL = (
   (typeof window !== 'undefined' && window.API_BASE_URL) ||
-  (typeof window !== 'undefined' && (window.location.protocol === 'file:' || (window.location.port && window.location.port !== '3000'))
-    ? 'https://api.kichikalloma.uz'
-    : '')
+  'https://api.kichikalloma.uz'
 ).replace(/\/+$/, '');
+
+window.API_BASE_URL = API_BASE_URL;
 
 window.getApiBaseUrl = function () {
   return API_BASE_URL;
