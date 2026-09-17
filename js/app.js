@@ -2308,6 +2308,12 @@ async function fetchUranWords() {
   }
 }
 
+function renderUranWords() {
+  if (currentOpenCatId) {
+    renderUranDetailWords();
+  }
+}
+
 function populateUranCategoryDropdowns() {
   const modalSelect = document.getElementById('uran-word-category-select');
   if (modalSelect) {
@@ -3138,6 +3144,7 @@ window.openUranCategoryDetail = openUranCategoryDetail;
 window.closeUranCategoryDetail = closeUranCategoryDetail;
 window.filterUranDetailWords = filterUranDetailWords;
 window.renderUranCategories = renderUranCategories;
+window.renderUranWords = renderUranWords;
 window.renderUranDetailWords = renderUranDetailWords;
 window.handleSaveUranWord = handleSaveUranWord;
 window.handleDeleteUranWord = handleDeleteUranWord;
