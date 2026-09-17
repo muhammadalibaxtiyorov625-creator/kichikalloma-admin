@@ -642,12 +642,6 @@ window.handlePlanetVideoFileUpload = async function(event) {
   const file = event.target.files && event.target.files[0];
   if (!file) return;
 
-  if (file.size > 120 * 1024 * 1024) {
-    showToast("Video hajmi 120MB dan oshmasligi kerak!", "error");
-    event.target.value = '';
-    return;
-  }
-
   const formData = new FormData();
   formData.append('file', file);
 
@@ -660,8 +654,18 @@ window.handlePlanetVideoFileUpload = async function(event) {
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Video yuklashda xatolik yuz berdi");
+      let errMsg = "Video yuklashda xatolik yuz berdi";
+      if (res.status === 413) {
+        errMsg = "Video hajmi juda katta (413 Request Entity Too Large)! Serverda Nginx 'client_max_body_size 100M;' sozlanmagan.";
+      } else {
+        try {
+          const err = await res.json();
+          errMsg = err.detail || errMsg;
+        } catch (e) {
+          errMsg = `Server xatoligi: ${res.status} ${res.statusText}`;
+        }
+      }
+      throw new Error(errMsg);
     }
 
     const data = await res.json();
@@ -1289,15 +1293,80 @@ async function handleDeleteGallery(id) {
   }
 }
 
+// Helper to automatically compress images client-side before upload to prevent HTTP 413
+async function compressImageIfNeeded(file, maxDimension = 1600, maxSizeBytes = 950 * 1024) {
+  if (!file || !file.type || !file.type.startsWith('image/') || file.type.includes('svg')) {
+    return file;
+  }
+
+  // Agar rasm hajmi 950KB dan kichik bo'lsa, o'zgartirish shart emas
+  if (file.size <= maxSizeBytes) {
+    return file;
+  }
+
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height * maxDimension) / width);
+            width = maxDimension;
+          } else {
+            width = Math.round((width * maxDimension) / height);
+            height = maxDimension;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        canvas.toBlob(
+          (blob) => {
+            if (blob && blob.size < file.size) {
+              const newFileName = file.name.replace(/\.[^/.]+$/, "") + ".jpg";
+              const compressedFile = new File([blob], newFileName, {
+                type: 'image/jpeg',
+                lastModified: Date.now()
+              });
+              resolve(compressedFile);
+            } else {
+              resolve(file);
+            }
+          },
+          'image/jpeg',
+          0.85
+        );
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    reader.onerror = () => resolve(file);
+    reader.readAsDataURL(file);
+  });
+}
+
 // Universal Direct File Upload to /api/website/upload (For Planets, Teams & Gallery)
 async function handleFileUpload(event, type = 'planet') {
-  const file = event.target.files[0];
+  let file = event.target.files && event.target.files[0];
   if (!file) return;
 
-  const formData = new FormData();
-  formData.append('file', file);
-
   try {
+    if (file.type && file.type.startsWith('image/') && file.size > 950 * 1024) {
+      showToast("Katta hajmdagi rasm avtomatik optimallashtirilmoqda...", "info");
+      file = await compressImageIfNeeded(file);
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
     showToast("Rasm serverga yuklanmoqda...", "info");
     const res = await fetch('/api/website/upload', {
       method: 'POST',
@@ -1305,8 +1374,18 @@ async function handleFileUpload(event, type = 'planet') {
     });
 
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || "Rasmni yuklab bo'lmadi");
+      let errMsg = "Rasmni yuklab bo'lmadi";
+      if (res.status === 413) {
+        errMsg = "Fayl hajmi juda katta (413 Request Entity Too Large)! Serverda Nginx 'client_max_body_size' limiti oshirilishi kerak yoki kichikroq fayl tanlang.";
+      } else {
+        try {
+          const err = await res.json();
+          errMsg = err.detail || errMsg;
+        } catch (e) {
+          errMsg = `Server xatoligi: ${res.status} ${res.statusText}`;
+        }
+      }
+      throw new Error(errMsg);
     }
 
     const data = await res.json();
@@ -1324,7 +1403,7 @@ async function handleFileUpload(event, type = 'planet') {
       updateGalleryImageDisplay(data.url, file.name);
     }
 
-    showToast("Rasm muvaffaqiyatli yuklandi!");
+    showToast("Rasm muvaffaqiyatli yuklandi!", "success");
   } catch (err) {
     showToast(err.message, "error");
   }
@@ -2648,21 +2727,40 @@ function renderUranPresetImages(activePath) {
 }
 
 async function handleUploadUranCatImage(input) {
-  const file = input.files && input.files[0];
+  let file = input.files && input.files[0];
   if (!file) return;
 
   const statusEl = document.getElementById('uran-cat-upload-status');
   if (statusEl) statusEl.innerText = "Yuklanmoqda...";
 
-  const formData = new FormData();
-  formData.append('file', file);
-
   try {
+    if (file.type && file.type.startsWith('image/') && file.size > 950 * 1024) {
+      file = await compressImageIfNeeded(file);
+    }
+
+    const formData = new FormData();
+    formData.append('file', file);
+
     const res = await fetch('/api/website/uran/upload-image', {
       method: 'POST',
       body: formData
     });
-    if (!res.ok) throw new Error("Rasm yuklashda xatolik");
+
+    if (!res.ok) {
+      let errMsg = "Rasm yuklashda xatolik";
+      if (res.status === 413) {
+        errMsg = "Fayl hajmi juda katta (413 Request Entity Too Large)!";
+      } else {
+        try {
+          const err = await res.json();
+          errMsg = err.detail || errMsg;
+        } catch (e) {
+          errMsg = `Server xatoligi: ${res.status} ${res.statusText}`;
+        }
+      }
+      throw new Error(errMsg);
+    }
+
     const data = await res.json();
     const uploadedUrl = data.relative_url || data.url;
     const imgInput = document.getElementById('uran-cat-image');
